@@ -24,6 +24,32 @@
 extern kern_return_t _start(kmod_info_t *ki, void *data);
 extern kern_return_t _stop(kmod_info_t *ki, void *data);
 
+extern void IOLog(const char *fmt, ...);
+
+/*
+ * The IOResources personality is not matched on a live-loaded kext, so we
+ * publish/terminate DirectHWService explicitly from the module start/stop
+ * (implemented in DirectHW.cpp).
+ */
+extern kern_return_t DirectHW_publishService(void);
+extern void          DirectHW_terminateService(void);
+
+static kern_return_t dhw_realmain(kmod_info_t *ki, void *data)
+{
+	kern_return_t r;
+	(void)ki; (void)data;
+	r = DirectHW_publishService();
+	IOLog("DirectHW: publishService returned 0x%x\n", r);
+	return KERN_SUCCESS;	/* stay loaded regardless, for diagnosability */
+}
+
+static kern_return_t dhw_antimain(kmod_info_t *ki, void *data)
+{
+	(void)ki; (void)data;
+	DirectHW_terminateService();
+	return KERN_SUCCESS;
+}
+
 __attribute__((visibility("default")))
 kmod_info_t kmod_info = {
 	.next            = NULL,
@@ -42,6 +68,6 @@ kmod_info_t kmod_info = {
 
 /* IOKit driver kexts have no explicit main(); the OSMetaClass machinery does
  * the work. libkmod's _start/_stop call through these null hooks. */
-__private_extern__ kmod_start_func_t *_realmain = NULL;
-__private_extern__ kmod_stop_func_t  *_antimain = NULL;
+__private_extern__ kmod_start_func_t *_realmain = dhw_realmain;
+__private_extern__ kmod_stop_func_t  *_antimain = dhw_antimain;
 __private_extern__ int _kext_apple_cc = __APPLE_CC__;

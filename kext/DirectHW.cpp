@@ -20,6 +20,7 @@
 #include <IOKit/IOUserClient.h>
 #include <IOKit/IOKitKeys.h>
 #include <IOKit/IOMemoryDescriptor.h>
+#include <IOKit/IOPlatformExpert.h>
 #include <stdint.h>
 
 #include "DirectHW.hpp"
@@ -33,16 +34,72 @@ OSDefineMetaClassAndStructors(DirectHWService, IOService)
 
 bool DirectHWService::start(IOService * provider)
 {
-        //IOLog("DirectHW: Driver v%s (compiled on %s) loaded. "
-		//"Visit http://www.coresystems.de/ for more information.\n",
-			//DIRECTHW_VERSION, __DATE__);
-
 	if (super::start(provider)) {
 		registerService();
 		return true;
 	}
 
 	return false;
+}
+
+/*
+ * On Apple Silicon a live-loaded kext (kmutil load) runs its code but does not
+ * drive IOKit personality matching, and the boot/AuxKC path may be unavailable,
+ * so the IOResources personality never instantiates DirectHWService. Publish the
+ * service directly from the module start function instead. This is called from
+ * the kmod start (DirectHW_kmod.c), which is proven to execute.
+ */
+static DirectHWService *gDirectHWService = NULL;
+
+extern "C" kern_return_t DirectHW_publishService(void)
+{
+	if (gDirectHWService)
+		return KERN_SUCCESS;
+
+	IOService *provider = IOService::getPlatform();
+	if (provider == NULL) {
+		IOLog("DirectHW: publishService: no platform provider\n");
+		return KERN_FAILURE;
+	}
+
+	DirectHWService *svc = OSTypeAlloc(DirectHWService);
+	if (svc == NULL)
+		return KERN_FAILURE;
+
+	if (!svc->init()) {
+		IOLog("DirectHW: publishService: init failed\n");
+		svc->release();
+		return KERN_FAILURE;
+	}
+
+	/* So IOServiceOpen() can create the user client without a matched personality. */
+	svc->setProperty("IOUserClientClass", "DirectHWUserClient");
+
+	if (!svc->attach(provider)) {
+		IOLog("DirectHW: publishService: attach failed\n");
+		svc->release();
+		return KERN_FAILURE;
+	}
+
+	if (!svc->start(provider)) {
+		IOLog("DirectHW: publishService: start failed\n");
+		svc->detach(provider);
+		svc->release();
+		return KERN_FAILURE;
+	}
+
+	gDirectHWService = svc;
+	IOLog("DirectHW: service published programmatically\n");
+	return KERN_SUCCESS;
+}
+
+extern "C" void DirectHW_terminateService(void)
+{
+	if (gDirectHWService) {
+		gDirectHWService->terminate();
+		gDirectHWService->release();
+		gDirectHWService = NULL;
+	}
 }
 
 #undef super
