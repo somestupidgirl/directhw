@@ -112,7 +112,7 @@ build_all:
 	@echo "==> Staging Final Artifacts into $(OUT)/..."
 	mv kext/$(KEXTNAME).kext $(OUT)/
 	-mv kext/$(KEXTNAME).kext.dSYM $(OUT)/ 2>/dev/null || true
-	mv lib/libdirecthw/libdirecthw.a lib/libdirecthw/libdirecthw.dylib lib/libdirecthw/directhw.framework $(OUT)/
+	mv lib/libdirecthw/libdirecthw.a lib/libdirecthw/libdirecthw.dylib lib/libdirecthw/$(BUNDLE_NAME).framework $(OUT)/
 
 endif
 
@@ -123,9 +123,38 @@ load: all
 unload:
 	$(MAKE) -C kext unload KEXTBUNDLE="../$(OUT)/$(KEXTNAME).kext"
 
+# Installation destinations (override on the command line if needed)
+KEXT_PREFIX  ?= /Library/Extensions
+INCLUDEDIR   ?= /usr/local/include
+LIBDIR       ?= /usr/local/lib
+FRAMEWORKDIR ?= /Library/Frameworks
+
+install: all
+	@echo "==> Installing $(KEXTNAME).kext into $(KEXT_PREFIX)"
+	sudo rm -rf "$(KEXT_PREFIX)/$(KEXTNAME).kext"
+	sudo cp -R "$(OUT)/$(KEXTNAME).kext" "$(KEXT_PREFIX)/$(KEXTNAME).kext"
+	sudo chown -R root:wheel "$(KEXT_PREFIX)/$(KEXTNAME).kext"
+	sudo chmod -R 755 "$(KEXT_PREFIX)/$(KEXTNAME).kext"
+	@echo "==> Installing DirectHW.h into $(INCLUDEDIR)"
+	sudo mkdir -p "$(INCLUDEDIR)"
+	sudo install -m 0644 include/DirectHW.h "$(INCLUDEDIR)/DirectHW.h"
+	@echo "==> Installing libraries into $(LIBDIR)"
+	sudo mkdir -p "$(LIBDIR)"
+	sudo install -m 0644 "$(OUT)/libdirecthw.a"     "$(LIBDIR)/libDirectHW.a"
+	sudo install -m 0755 "$(OUT)/libdirecthw.dylib" "$(LIBDIR)/libDirectHW.dylib"
+	@echo "==> Installing DirectHW.framework into $(FRAMEWORKDIR)"
+	sudo rm -rf "$(FRAMEWORKDIR)/DirectHW.framework"
+	sudo cp -R "$(OUT)/DirectHW.framework" "$(FRAMEWORKDIR)/DirectHW.framework"
+
+uninstall:
+	sudo rm -rf "$(KEXT_PREFIX)/$(KEXTNAME).kext"
+	sudo rm -f  "$(INCLUDEDIR)/DirectHW.h"
+	sudo rm -f  "$(LIBDIR)/libDirectHW.a" "$(LIBDIR)/libDirectHW.dylib"
+	sudo rm -rf "$(FRAMEWORKDIR)/DirectHW.framework"
+
 clean:
 	rm -rf $(OUT)
 	$(MAKE) -C lib/libdirecthw clean
 	$(MAKE) -C kext clean
 
-.PHONY: all build_all load unload clean
+.PHONY: all build_all load unload install uninstall clean
