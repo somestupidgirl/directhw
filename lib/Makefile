@@ -7,12 +7,12 @@ MAKE=make
 all: debug
 
 debug:
-	$(MAKE) -C libdirecthw
+	$(MAKE) -C libDirectHW
 
 release: TARGET=release
 release: debug
 
 clean:
-	$(MAKE) -C libdirecthw clean
+	$(MAKE) -C libDirectHW clean
 
 .PHONY: all debug release clean

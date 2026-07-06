@@ -71,23 +71,23 @@ build_all:
 	rm -rf $(OUT)
 	mkdir -p $(OUT) $(OUT)/.arm64e $(OUT)/.x86_64
 	@echo "==> Building Apple Silicon Slices..."
-	$(MAKE) -C lib/libdirecthw all $(LIB_FLAGS)
+	$(MAKE) -C lib/libDirectHW all $(LIB_FLAGS)
 	$(MAKE) -C kext debug $(KEXT_FLAGS)
 	mv kext/$(KEXTNAME).kext $(OUT)/$(KEXTNAME).kext.arm64e
-	cp lib/libdirecthw/libdirecthw.a     $(OUT)/.arm64e/
-	cp lib/libdirecthw/libdirecthw.dylib $(OUT)/.arm64e/
-	cp lib/libdirecthw/$(FWBIN)          $(OUT)/.arm64e/fwbin
+	cp lib/libDirectHW/libDirectHW.a     $(OUT)/.arm64e/
+	cp lib/libDirectHW/libDirectHW.dylib $(OUT)/.arm64e/
+	cp lib/libDirectHW/$(FWBIN)          $(OUT)/.arm64e/fwbin
 	@# Keep one full framework skeleton (symlinks, Info.plist) from this slice
-	cp -R lib/libdirecthw/$(BUNDLE_NAME).framework $(OUT)/$(BUNDLE_NAME).framework
+	cp -R lib/libDirectHW/$(BUNDLE_NAME).framework $(OUT)/$(BUNDLE_NAME).framework
 	$(MAKE) -C kext clean
-	$(MAKE) -C lib/libdirecthw clean
+	$(MAKE) -C lib/libDirectHW clean
 	@echo "==> Building Intel Core Slices..."
-	$(MAKE) -C lib/libdirecthw all ARCHFLAGS="-arch x86_64" TARGET_TRIPLE="x86_64-apple-macos10.15"
+	$(MAKE) -C lib/libDirectHW all ARCHFLAGS="-arch x86_64" TARGET_TRIPLE="x86_64-apple-macos10.15"
 	$(MAKE) -C kext debug ARCHFLAGS="-arch x86_64" TARGET_TRIPLE="x86_64-apple-macos10.15"
 	mv kext/$(KEXTNAME).kext $(OUT)/$(KEXTNAME).kext.x86_64
-	cp lib/libdirecthw/libdirecthw.a     $(OUT)/.x86_64/
-	cp lib/libdirecthw/libdirecthw.dylib $(OUT)/.x86_64/
-	cp lib/libdirecthw/$(FWBIN)          $(OUT)/.x86_64/fwbin
+	cp lib/libDirectHW/libDirectHW.a     $(OUT)/.x86_64/
+	cp lib/libDirectHW/libDirectHW.dylib $(OUT)/.x86_64/
+	cp lib/libDirectHW/$(FWBIN)          $(OUT)/.x86_64/fwbin
 	@echo "==> Packaging Universal Fat Binaries..."
 	cp -R $(OUT)/$(KEXTNAME).kext.arm64e $(OUT)/$(KEXTNAME).kext
 	lipo -create $(OUT)/$(KEXTNAME).kext.arm64e/Contents/MacOS/$(KEXTNAME) \
@@ -95,8 +95,8 @@ build_all:
 	     -output $(OUT)/$(KEXTNAME).kext/Contents/MacOS/$(KEXTNAME)
 	codesign --force --timestamp=none --sign - $(OUT)/$(KEXTNAME).kext
 	@# Fuse the userspace library slices into fat binaries
-	lipo -create $(OUT)/.arm64e/libdirecthw.a     $(OUT)/.x86_64/libdirecthw.a     -output $(OUT)/libdirecthw.a
-	lipo -create $(OUT)/.arm64e/libdirecthw.dylib $(OUT)/.x86_64/libdirecthw.dylib -output $(OUT)/libdirecthw.dylib
+	lipo -create $(OUT)/.arm64e/libDirectHW.a     $(OUT)/.x86_64/libDirectHW.a     -output $(OUT)/libDirectHW.a
+	lipo -create $(OUT)/.arm64e/libDirectHW.dylib $(OUT)/.x86_64/libDirectHW.dylib -output $(OUT)/libDirectHW.dylib
 	lipo -create $(OUT)/.arm64e/fwbin             $(OUT)/.x86_64/fwbin             -output $(OUT)/$(FWBIN)
 	rm -rf $(OUT)/$(KEXTNAME).kext.arm64e $(OUT)/$(KEXTNAME).kext.x86_64 $(OUT)/.arm64e $(OUT)/.x86_64
 
@@ -107,12 +107,12 @@ build_all:
 	rm -rf $(OUT)
 	mkdir -p $(OUT)
 	@echo "==> Compiling Subdirectories ($(ARCH))..."
-	$(MAKE) -C lib/libdirecthw all $(LIB_FLAGS)
+	$(MAKE) -C lib/libDirectHW all $(LIB_FLAGS)
 	$(MAKE) -C kext debug $(KEXT_FLAGS)
 	@echo "==> Staging Final Artifacts into $(OUT)/..."
 	mv kext/$(KEXTNAME).kext $(OUT)/
 	-mv kext/$(KEXTNAME).kext.dSYM $(OUT)/ 2>/dev/null || true
-	mv lib/libdirecthw/libdirecthw.a lib/libdirecthw/libdirecthw.dylib lib/libdirecthw/$(BUNDLE_NAME).framework $(OUT)/
+	mv lib/libDirectHW/libDirectHW.a lib/libDirectHW/libDirectHW.dylib lib/libDirectHW/$(BUNDLE_NAME).framework $(OUT)/
 
 endif
 
@@ -140,8 +140,8 @@ install: all
 	sudo install -m 0644 include/DirectHW.h "$(INCLUDEDIR)/DirectHW.h"
 	@echo "==> Installing libraries into $(LIBDIR)"
 	sudo mkdir -p "$(LIBDIR)"
-	sudo install -m 0644 "$(OUT)/libdirecthw.a"     "$(LIBDIR)/libDirectHW.a"
-	sudo install -m 0755 "$(OUT)/libdirecthw.dylib" "$(LIBDIR)/libDirectHW.dylib"
+	sudo install -m 0644 "$(OUT)/libDirectHW.a"     "$(LIBDIR)/libDirectHW.a"
+	sudo install -m 0755 "$(OUT)/libDirectHW.dylib" "$(LIBDIR)/libDirectHW.dylib"
 	@echo "==> Installing DirectHW.framework into $(FRAMEWORKDIR)"
 	sudo rm -rf "$(FRAMEWORKDIR)/DirectHW.framework"
 	sudo cp -R "$(OUT)/DirectHW.framework" "$(FRAMEWORKDIR)/DirectHW.framework"
@@ -154,7 +154,7 @@ uninstall:
 
 clean:
 	rm -rf $(OUT)
-	$(MAKE) -C lib/libdirecthw clean
+	$(MAKE) -C lib/libDirectHW clean
 	$(MAKE) -C kext clean
 
 .PHONY: all build_all load unload install uninstall clean
