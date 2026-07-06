@@ -17,13 +17,13 @@
  */
 
 #include <AvailabilityMacros.h>
-#include <IOKit/IOKitLib.h>
+#include <IOKitLib.h>
 #include <ApplicationServices/ApplicationServices.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include <unistd.h>
 #include <inttypes.h>
 #include <errno.h>
-#include "DirectHW.h"
+#include <DirectHW.h>
 
 #ifndef MAP_FAILED
 #define MAP_FAILED	((void *)-1)

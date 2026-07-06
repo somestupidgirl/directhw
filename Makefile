@@ -1,47 +1,119 @@
 #
-# DirectHW - Kernel extension to pass through IO commands to user space
+# DirectHW Root Unified Automation Makefile
 #
-# Copyright © 2008-2010 coresystems GmbH <info@coresystems.de>
-#
-# Permission to use, copy, modify, and/or distribute this software for any
-# purpose with or without fee is hereby granted, provided that the above
-# copyright notice and this permission notice appear in all copies.
-# 
-# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
-# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
-# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
-# ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
-# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
-# ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
-# OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+# Usage:
+#   make                    # Build kext + lib into $(OUT)
+#   make ARCH=arm64e        # Apple Silicon target architecture
+#   make ARCH=x86_64        # Intel target architecture
+#   make ARCH=universal     # Fat architecture slice binding (arm64e + x86_64)
+#   sudo make load          # Loads the compiled kext locally
+#   make clean              # Removes root-level and subdirectory artifacts
 #
 
-all: main libs
+MAKE := make
+OUT  := out
 
-main:
-	xcodebuild -alltargets
+# Project Overrides from Makefile.inc integration
+-include Makefile.inc
+# Must match the kext's own default (kext/Makefile: KEXTNAME ?= $(BUNDLE_NAME)),
+# otherwise the staging `mv` below cannot find the built bundle.
+KEXTNAME ?= $(BUNDLE_NAME)
 
-libs: DirectHW.c DirectHW.h
-	$(CC) DirectHW.c -dynamiclib -framework IOKit -o libDirectHW.dylib
-	$(CC) -static -c DirectHW.c -o libDirectHW.a
-	mv libDirectHW.dylib build/Release/libDirectHW$(LIBNAME).dylib
-	mv libDirectHW.a build/Release/libDirectHW.a
+# Detect native arch if ARCH not specified
+NATIVE_ARCH := $(shell uname -m)
+ifeq ($(NATIVE_ARCH),arm64)
+    DEFAULT_ARCH := arm64e
+else
+    DEFAULT_ARCH := x86_64
+endif
+ARCH ?= $(DEFAULT_ARCH)
 
-install:
-	sudo mkdir -p /usr/local/lib
-	sudo cp -r build/Release/DirectHW.kext /System/Library/Extensions/DirectHW.kext
-	sudo cp -r build/Release/DirectHW.framework /System/Library/Frameworks/DirectHW.framework
-	sudo cp -r build/Release/libDirectHW.a /usr/local/lib/libDirectHW.a
-	sudo cp -r build/Release/libDirectHW.dylib /usr/local/lib/libDirectHW.dylib
-	sudo chmod -R 755 /System/Library/Extensions/DirectHW.kext
-	sudo chmod -R 755 /System/Library/Frameworks/DirectHW.framework
-	sudo chmod 644 /usr/local/lib/libDirectHW.a
-	sudo chmod 644 /usr/local/lib/libDirectHW.dylib
-	sudo chown -R root:wheel /System/Library/Extensions/DirectHW.kext
-	sudo chown -R root:wheel /System/Library/Frameworks/DirectHW.framework
-	sudo kextunload -v /System/Library/Extensions/DirectHW.kext
-	sudo kextload -v /System/Library/Extensions/DirectHW.kext
-	sudo kextcache -f -update-volume /
+# Enforce explicit arm64e translation layer for Apple Silicon kernel spaces
+ifeq ($(ARCH),arm64)
+    override ARCH := arm64e
+endif
+
+# Per-architecture cross-compilation environment matrices
+ifeq ($(ARCH),arm64e)
+    KEXT_ARCHFLAGS := -arch arm64e
+    KEXT_TRIPLE    := arm64e-apple-macos12.0
+    LIB_ARCHFLAGS  := -arch arm64e
+    LIB_TRIPLE     := arm64e-apple-macos12.0
+else ifeq ($(ARCH),x86_64)
+    KEXT_ARCHFLAGS := -arch x86_64
+    KEXT_TRIPLE    := x86_64-apple-macos10.15
+    LIB_ARCHFLAGS  := -arch x86_64
+    LIB_TRIPLE     := x86_64-apple-macos10.15
+else ifeq ($(ARCH),universal)
+    KEXT_ARCHFLAGS := -arch arm64e
+    KEXT_TRIPLE    := arm64e-apple-macos12.0
+    LIB_ARCHFLAGS  := -arch arm64e
+    LIB_TRIPLE     := arm64e-apple-macos12.0
+else
+    $(error Unknown ARCH=$(ARCH). Use arm64e, x86_64, or universal)
+endif
+
+KEXT_FLAGS := ARCHFLAGS="$(KEXT_ARCHFLAGS)" TARGET_TRIPLE="$(KEXT_TRIPLE)"
+LIB_FLAGS  := ARCHFLAGS="$(LIB_ARCHFLAGS)"  TARGET_TRIPLE="$(LIB_TRIPLE)"
+
+# Force linear sequence execution (prevent interleaved stdout logging collisions)
+.NOTPARALLEL:
+
+# Default execution hooks everything target pipelines
+all: build_all
+
+ifeq ($(ARCH),universal)
+
+# Target builds for universal fat binary distributions 
+build_all:
+	rm -rf $(OUT)
+	mkdir -p $(OUT)
+	@echo "==> Building Apple Silicon Slices..."
+	$(MAKE) -C lib/libdirecthw all $(LIB_FLAGS)
+	$(MAKE) -C kext debug $(KEXT_FLAGS)
+	mv kext/$(KEXTNAME).kext $(OUT)/$(KEXTNAME).kext.arm64e
+	$(MAKE) -C kext clean
+	$(MAKE) -C lib/libdirecthw clean
+	@echo "==> Building Intel Core Slices..."
+	$(MAKE) -C lib/libdirecthw all ARCHFLAGS="-arch x86_64" TARGET_TRIPLE="x86_64-apple-macos10.15"
+	$(MAKE) -C kext debug ARCHFLAGS="-arch x86_64" TARGET_TRIPLE="x86_64-apple-macos10.15"
+	mv kext/$(KEXTNAME).kext $(OUT)/$(KEXTNAME).kext.x86_64
+	@echo "==> Packaging Universal Fat Binaries..."
+	cp -R $(OUT)/$(KEXTNAME).kext.arm64e $(OUT)/$(KEXTNAME).kext
+	lipo -create $(OUT)/$(KEXTNAME).kext.arm64e/Contents/MacOS/$(KEXTNAME) \
+	             $(OUT)/$(KEXTNAME).kext.x86_64/Contents/MacOS/$(KEXTNAME) \
+	     -output $(OUT)/$(KEXTNAME).kext/Contents/MacOS/$(KEXTNAME)
+	codesign --force --timestamp=none --sign - $(OUT)/$(KEXTNAME).kext
+	rm -rf $(OUT)/$(KEXTNAME).kext.arm64e $(OUT)/$(KEXTNAME).kext.x86_64
+	@# Move local compilation frameworks and libraries into root out directory
+	mv lib/libdirecthw/libdirecthw.a lib/libdirecthw/libdirecthw.dylib lib/libdirecthw/directhw.framework $(OUT)/
+
+else
+
+# Target builds for single selected architecture slices
+build_all:
+	rm -rf $(OUT)
+	mkdir -p $(OUT)
+	@echo "==> Compiling Subdirectories ($(ARCH))..."
+	$(MAKE) -C lib/libdirecthw all $(LIB_FLAGS)
+	$(MAKE) -C kext debug $(KEXT_FLAGS)
+	@echo "==> Staging Final Artifacts into $(OUT)/..."
+	mv kext/$(KEXTNAME).kext $(OUT)/
+	-mv kext/$(KEXTNAME).kext.dSYM $(OUT)/ 2>/dev/null || true
+	mv lib/libdirecthw/libdirecthw.a lib/libdirecthw/libdirecthw.dylib lib/libdirecthw/directhw.framework $(OUT)/
+
+endif
+
+# Convenience pass-through rule for testing kernel loading parameters
+load: all
+	$(MAKE) -C kext load KEXTBUNDLE="../$(OUT)/$(KEXTNAME).kext" KEXTNAME="$(KEXTNAME)"
+
+unload:
+	$(MAKE) -C kext unload KEXTBUNDLE="../$(OUT)/$(KEXTNAME).kext"
 
 clean:
-	rm -rf build
+	rm -rf $(OUT)
+	$(MAKE) -C lib/libdirecthw clean
+	$(MAKE) -C kext clean
+
+.PHONY: all build_all load unload clean

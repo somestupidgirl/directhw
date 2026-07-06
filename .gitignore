@@ -2,3 +2,16 @@ DerivedData/*
 build/*
 *.o
 .DS_Store
+
+
+
+# Build artifacts
+out/
+*.a
+*.dylib
+*.out
+*.kext
+*.dSYM
+*.o.tmp
+Info.plist~
+lib/libdirecthw/*.framework/

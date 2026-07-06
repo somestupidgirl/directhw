@@ -1,4 +1,4 @@
-## Welcome to DirectHW by coresystems GmbH
+## DirectHW by coresystems GmbH
 
 DirectHW is a software compatibility layer for Mac OS X. It provides a kernel driver and framework that emulates the most commonly used hardware access functions on x86 machines, such as:
 
@@ -13,7 +13,20 @@ Visit http://www.coresystems.de/ for more information.
 
 ### Building/Installing
 
-Disable SIP if it's not already disabled. Then simply:
+
+Partially disable SIP and enable third-party kexts if not already set.
+
+Boot to Recovery mode. Then in the Recovery Mode Terminal:
+
+	csrutil enable --without kext --without debug --without nvram
+	reboot
+
+In Terminal:
+
+	sudo nvram boot-args="-arm64e_preview_abi kext-dev-mode=1 debug=0x144"
+	sudo reboot
+
+Then simply:
 
 	git clone https://github.com/sigma-1/directhw.git
 	cd directhw
