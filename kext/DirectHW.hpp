@@ -24,7 +24,7 @@ class DirectHWService:public IOService {
 	OSDeclareDefaultStructors(DirectHWService)
 
       public:
-	virtual bool start(IOService * provider);
+	virtual bool start(IOService * provider) override;
 
 };
 
@@ -79,21 +79,21 @@ class DirectHWUserClient:public IOUserClient {
 	} readmem_t;
 
       public:
-	virtual bool initWithTask(task_t task, void *securityID, UInt32 type);
+	virtual bool initWithTask(task_t task, void *securityID, UInt32 type) override;
 
-	virtual bool start(IOService * provider);
-	virtual void stop(IOService * provider);
+	virtual bool start(IOService * provider) override;
+	virtual void stop(IOService * provider) override;
 
-	virtual IOReturn clientMemoryForType(UInt32 type, UInt32 *flags, IOMemoryDescriptor **memory);
+	virtual IOReturn clientMemoryForType(UInt32 type, UInt32 *flags, IOMemoryDescriptor **memory) override;
 
-	virtual IOReturn clientClose(void);
+	virtual IOReturn clientClose(void) override;
 
       protected:
 	DirectHWService * fProvider;
 
 	static const IOExternalMethod fMethods[kNumberOfMethods];
 
-	virtual IOExternalMethod * getTargetAndMethodForIndex(IOService ** target, UInt32 index);
+	virtual IOExternalMethod * getTargetAndMethodForIndex(IOService ** target, UInt32 index) override;
 
 	virtual IOReturn ReadIO(iomem_t * inStruct, iomem_t * outStruct,
 				 IOByteCount inStructSize,
@@ -133,22 +133,9 @@ class DirectHWUserClient:public IOUserClient {
 	typedef struct { msrcmd_t *in, *out; bool Read; } MSRHelper;
 	typedef struct { cpuid_t *in, *out; } CPUIDHelper;
 	typedef struct { readmem_t *in, *out; } ReadMemHelper;
-	static inline void cpuid(uint32_t op1, uint32_t op2, uint32_t *data);
 };
 
-extern "C" {
-
-/* from sys/osfmk/i386/mp.c */
-
-extern void mp_rendezvous(
-	void (*setup_func)(void *),
-	void (*action_func)(void *),
-	void (*teardown_func)(void *),
-	void *arg);
-
-extern int cpu_number(void);
-
-}
+/* mp_rendezvous / cpu_xcall / cpu_number are declared in DirectHW_arch.hpp */
 
 #define INVALID_MSR_LO 0x63744857
 #define INVALID_MSR_HI 0x44697265

@@ -20,10 +20,10 @@
 #include <IOKit/IOUserClient.h>
 #include <IOKit/IOKitKeys.h>
 #include <IOKit/IOMemoryDescriptor.h>
-#include <architecture/i386/pio.h>
 #include <stdint.h>
 
 #include "DirectHW.hpp"
+#include "DirectHW_arch.hpp"
 
 #define DEBUG_KEXT
 
@@ -67,7 +67,7 @@ bool DirectHWUserClient::initWithTask(task_t task, void *securityID, UInt32 type
 	ret = super::initWithTask(task, securityID, type);
 
 #ifdef DEBUG_KEXT
-	IOLog("DirectHW: initWithTask(%p, %p, %08lx)\n", (void *)task, securityID, type);
+	IOLog("DirectHW: initWithTask(%p, %p, %08x)\n", (void *)task, securityID, (unsigned int)type);
 #endif
         if (!ret) {
 		IOLog("DirectHW: initWithTask failed.\n");
@@ -117,35 +117,8 @@ bool DirectHWUserClient::start(IOService * provider)
 		IOLog("DirectHW: Could not start client.\n");
 	}
 
-    uint32_t cr0, cr2, cr3;
-#ifdef __x86_64__
-__asm__ __volatile__ (
-                      "mov %%cr0, %%rax\n\t"
-                      "mov %%eax, %0\n\t"
-                      "mov %%cr2, %%rax\n\t"
-                      "mov %%eax, %1\n\t"
-                      "mov %%cr3, %%rax\n\t"
-                      "mov %%eax, %2\n\t"
-                      : "=m" (cr0), "=m" (cr2), "=m" (cr3)
-                      : /* no input */
-                      : "%rax"
-                      );
-#elif defined(__i386__)
-__asm__ __volatile__ (
-                      "mov %%cr0, %%eax\n\t"
-                      "mov %%eax, %0\n\t"
-                      "mov %%cr2, %%eax\n\t"
-                      "mov %%eax, %1\n\t"
-                      "mov %%cr3, %%eax\n\t"
-                      "mov %%eax, %2\n\t"
-                      : "=m" (cr0), "=m" (cr2), "=m" (cr3)
-                      : /* no input */
-                      : "%eax"
-                      );
-#endif
-    IOLog("DirectHW: cr0 = 0x%8.8X\n", cr0);
-    IOLog("DirectHW: cr2 = 0x%8.8X\n", cr2);
-    IOLog("DirectHW: cr3 = 0x%8.8X\n", cr3);
+    /* Dump a few control/system registers as a debug aid (arch specific). */
+    dhw::dump_control_regs();
     return success;
 }
 
@@ -180,22 +153,18 @@ DirectHWUserClient::ReadIO(iomem_t * inStruct, iomem_t * outStruct,
 	if (fProvider == NULL || isInactive()) {
 		return kIOReturnNotAttached;
 	}
-	 
-	switch (inStruct->width) {
-	case 1:
-		outStruct->data = inb(inStruct->offset);
-		break;
-	case 2:
-		outStruct->data = inw(inStruct->offset);
-		break;
-	case 4:
-		outStruct->data = inl(inStruct->offset);
-		break;
-	default:
-		IOLog("DirectHW: Invalid read attempt %d bytes at IO address %x\n",
-		      (int)inStruct->width, (unsigned int)inStruct->offset);
-		break;
+
+	/*
+	 * x86: `offset` is an I/O port. arm64: there is no port I/O space, so
+	 * `offset` is interpreted as a physical MMIO address (see DirectHW_arch.hpp).
+	 */
+	uint32_t data = 0;
+	if (!dhw::port_read(inStruct->offset, inStruct->width, &data)) {
+		IOLog("DirectHW: Invalid read attempt %d bytes at IO address %llx\n",
+		      (int)inStruct->width, (unsigned long long)inStruct->offset);
+		return kIOReturnBadArgument;
 	}
+	outStruct->data = data;
 
 #ifdef DEBUG_KEXT
 	IOLog("DirectHW: Read %d bytes at IO address %x (result=%x)\n",
@@ -223,19 +192,11 @@ DirectHWUserClient::WriteIO(iomem_t * inStruct, iomem_t * outStruct,
 		      inStruct->width, inStruct->offset, inStruct->data);
 #endif
 	
-	switch (inStruct->width) {
-	case 1:
-		outb(inStruct->offset, inStruct->data);
-		break;
-	case 2:
-		outw(inStruct->offset, inStruct->data);
-		break;
-	case 4:
-		outl(inStruct->offset, inStruct->data);
-		break;
-	default:
-		IOLog("DirectHW: Invalid write attempt %d bytes at IO address %x\n",
-		      (int)inStruct->width, (unsigned int)inStruct->offset);
+	/* x86: I/O port write. arm64: physical MMIO write (see DirectHW_arch.hpp). */
+	if (!dhw::port_write(inStruct->offset, inStruct->width, inStruct->data)) {
+		IOLog("DirectHW: Invalid write attempt %d bytes at IO address %llx\n",
+		      (int)inStruct->width, (unsigned long long)inStruct->offset);
+		return kIOReturnBadArgument;
 	}
 
 	*outStructSize = sizeof(iomem_t);
@@ -260,7 +221,8 @@ DirectHWUserClient::PrepareMap(map_t * inStruct, map_t * outStruct,
 	LastMapSize = inStruct->size;
 
 #ifdef DEBUG_KEXT
-	IOLog("DirectHW: PrepareMap 0x%08x[0x%x]\n", LastMapAddr, LastMapSize);
+	IOLog("DirectHW: PrepareMap 0x%08llx[0x%llx]\n",
+		(unsigned long long)LastMapAddr, (unsigned long long)LastMapSize);
 #endif
 
 	*outStructSize = sizeof(map_t);
@@ -268,25 +230,15 @@ DirectHWUserClient::PrepareMap(map_t * inStruct, map_t * outStruct,
 	return kIOReturnSuccess;
 }
 
-inline void
-DirectHWUserClient::cpuid(uint32_t op1, uint32_t op2, uint32_t *data)
-{
-	asm("cpuid"
-		: "=a" (data[0]),
-		"=b" (data[1]),
-		"=c" (data[2]),
-		"=d" (data[3])
-		: "a"(op1), "c"(op2));
-}
-
 void
 DirectHWUserClient::CPUIDHelperFunction(void *data)
 {
 	CPUIDHelper * cpuData = (CPUIDHelper *)data;
-    cpuData->out->core = -1;
-    if (cpuData->in->core != cpu_number())
+    cpuData->out->core = (uint32_t)-1;
+    if ((int)cpuData->in->core != cpu_number())
         return;
-    cpuid(cpuData->in->eax, cpuData->in->ecx, cpuData->out->output);
+    /* x86: CPUID(eax,ecx). arm64: MIDR/ID_AA64* identification. */
+    dhw::cpu_identify(cpuData->in->eax, cpuData->in->ecx, cpuData->out->output);
     cpuData->out->eax = cpuData->in->eax;
     cpuData->out->ecx = cpuData->in->ecx;
     cpuData->out->core = cpuData->in->core;
@@ -296,18 +248,16 @@ void
 DirectHWUserClient::ReadMemHelperFunction(void *data)
 {
 	ReadMemHelper * memData = (ReadMemHelper *)data;
-    memData->out->core = -1;
-    if (memData->in->core != cpu_number())
+    memData->out->core = (uint32_t)-1;
+    if ((int)memData->in->core != cpu_number())
         return;
-    uint32_t out;
-    uint64_t addr;
-	__asm__ ("mov %1,%%eax\t\n"
-             "mov %%eax, %0\t\n"
-		: "=m" (out)
-		: "m" (addr)
-        : "%eax"
-    );
-	memData->out->data = out;
+    /*
+     * Read a 32-bit word from the requested physical address. The original
+     * x86 code read an uninitialised stack variable; use the IOKit mapped
+     * physical accessor, which works on both architectures.
+     */
+    memData->out->data = dhw::phys_read32(memData->in->addr);
+    memData->out->core = memData->in->core;
 }
 
 void
@@ -317,44 +267,49 @@ DirectHWUserClient::MSRHelperFunction(void *data)
 	msrcmd_t * inStruct = MSRData->in;
 	msrcmd_t * outStruct = MSRData->out;
 
-	outStruct->core = -1;
+	outStruct->core = (UInt32)-1;
 	outStruct->lo = INVALID_MSR_LO;
 	outStruct->hi = INVALID_MSR_HI;
 
+#if defined(__x86_64__) || defined(__i386__)
+	/*
+	 * x86: avoid issuing RDMSR/WRMSR from a Hyper-Threading sibling by
+	 * deriving the SMT mask from CPUID. AArch64 has no such notion, so this
+	 * whole block is x86 only.
+	 */
 	uint32_t cpuiddata[4];
 
-	cpuid(1, 0, cpuiddata);
+	dhw::cpu_identify(1, 0, cpuiddata);
 	//bool have_ht = ((cpuiddata[3] & (1 << 28)) != 0);
 	uint32_t core_id = cpuiddata[1] >> 24;
 
-	cpuid(11, 0, cpuiddata);
+	dhw::cpu_identify(11, 0, cpuiddata);
 	uint32_t smt_mask = ~((-1) << (cpuiddata[0] &0x1f));
-
-	// TODO: What we want is this:
-	// if (inStruct->core != cpu_to_core(cpu_number()))
-	//	return;
 
 	if ((core_id & smt_mask) != core_id)
 		return; // It's a HT thread
+#endif
 
-	if (inStruct->core != cpu_number())
+	if ((int)inStruct->core != cpu_number())
 		return;
 
-	IOLog("DirectHW: ReadMSRHelper %d %d %x \n", inStruct->core,
-		cpu_number(), smt_mask);
+	IOLog("DirectHW: ReadMSRHelper core %u cpu %d index 0x%x\n",
+		(unsigned int)inStruct->core, cpu_number(), (unsigned int)inStruct->index);
 
+	/*
+	 * x86: RDMSR/WRMSR of inStruct->index.
+	 * arm64: inStruct->index is a DHW_ARM_* system-register selector.
+	 * A failed access leaves the INVALID_MSR sentinel in the output.
+	 */
 	if (MSRData->Read) {
-		asm volatile (
-			"rdmsr"
-			: "=a" (outStruct->lo), "=d" (outStruct->hi)
-			: "c" (inStruct->index)
-		);
+		uint32_t lo, hi;
+		if (dhw::sysreg_read(inStruct->index, &lo, &hi)) {
+			outStruct->lo = lo;
+			outStruct->hi = hi;
+		}
 	} else {
-		asm volatile (
-			"wrmsr"
-			: /* No outputs */
-			: "c" (inStruct->index), "a" (inStruct->lo), "d" (inStruct->hi)
-		);
+		if (!dhw::sysreg_write(inStruct->index, inStruct->lo, inStruct->hi))
+			return; // read-only / unknown selector: leave core = -1
 	}
 
 	outStruct->index = inStruct->index;
@@ -371,8 +326,8 @@ DirectHWUserClient::ReadCpuId(cpuid_t * inStruct, cpuid_t * outStruct,
 	}
 
 	CPUIDHelper cpuidData = { inStruct, outStruct};
-	mp_rendezvous(NULL, (void (*)(void *))CPUIDHelperFunction, NULL,
-			(void *)&cpuidData);
+	dhw::dispatch_on_core((int)inStruct->core,
+			(void (*)(void *))CPUIDHelperFunction, (void *)&cpuidData);
 
 	*outStructSize = sizeof(cpuid_t);
 
@@ -391,12 +346,14 @@ DirectHWUserClient::ReadMem(readmem_t * inStruct, readmem_t * outStruct,
 		return kIOReturnNotAttached;
 	}
 
-    if (cpu_number() != inStruct->core)
-		 return kIOReturnIOError;
-    outStruct->core = inStruct->core;
+	/*
+	 * Run the read pinned to the requested core via dispatch_on_core(); the
+	 * old code required the calling thread to already be on that core, which
+	 * it almost never is.
+	 */
 	ReadMemHelper memData = { inStruct, outStruct};
-	mp_rendezvous(NULL, (void (*)(void *))ReadMemHelperFunction, NULL,
-			(void *)&memData);
+	dhw::dispatch_on_core((int)inStruct->core,
+			(void (*)(void *))ReadMemHelperFunction, (void *)&memData);
 
 	*outStructSize = sizeof(readmem_t);
 
@@ -415,8 +372,8 @@ DirectHWUserClient::ReadMSR(msrcmd_t * inStruct, msrcmd_t * outStruct,
 	} 
 
 	MSRHelper MSRData = { inStruct, outStruct, true };
-	mp_rendezvous(NULL, (void (*)(void *))MSRHelperFunction, NULL,
-			(void *)&MSRData);
+	dhw::dispatch_on_core((int)inStruct->core,
+			(void (*)(void *))MSRHelperFunction, (void *)&MSRData);
 
 	*outStructSize = sizeof(msrcmd_t);
 
@@ -446,8 +403,8 @@ DirectHWUserClient::WriteMSR(msrcmd_t * inStruct, msrcmd_t * outStruct,
 			(unsigned int)inStruct->lo);
 
 	MSRHelper MSRData = { inStruct, outStruct, false };
-	mp_rendezvous(NULL, (void (*)(void *))MSRHelperFunction, NULL,
-			(void *)&MSRData);
+	dhw::dispatch_on_core((int)inStruct->core,
+			(void (*)(void *))MSRHelperFunction, (void *)&MSRData);
 
 	*outStructSize = sizeof(msrcmd_t);
 
@@ -475,8 +432,8 @@ IOReturn DirectHWUserClient::clientMemoryForType(UInt32 type, UInt32 *flags, IOM
 	}
 
 #ifdef DEBUG_KEXT
-	IOLog("DirectHW: Mapping physical 0x%08x[0x%x]\n",
-			LastMapAddr, LastMapSize);
+	IOLog("DirectHW: Mapping physical 0x%08llx[0x%llx]\n",
+			(unsigned long long)LastMapAddr, (unsigned long long)LastMapSize);
 #endif
 
 	newmemory = IOMemoryDescriptor::withPhysicalAddress(LastMapAddr, LastMapSize, kIODirectionIn);
