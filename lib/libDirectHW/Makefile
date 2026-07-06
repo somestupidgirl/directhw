@@ -30,6 +30,11 @@ STATIC_LIB   := lib$(BUNDLE_NAME).a
 DYNAMIC_LIB  := lib$(BUNDLE_NAME).dylib
 FRAMEWORK_NAME := $(BUNDLE_NAME).framework
 
+# Absolute install location baked into the dylib as its install_name, so that
+# programs linked against it (e.g. lspci) can find it at run time. Must match
+# where `make install` puts the library (root Makefile LIBDIR).
+LIBDIR ?= /usr/local/lib
+
 # Source and Object files
 SRCS := DirectHW.c
 OBJS := $(SRCS:.c=.o)
@@ -47,7 +52,7 @@ all: $(STATIC_LIB) $(DYNAMIC_LIB) framework
 
 # Rule for building the Dynamic Library (.dylib)
 $(DYNAMIC_LIB): $(OBJS)
-	$(CC) $(LDARCH) -dynamiclib -framework IOKit -o $@ $(OBJS)
+	$(CC) $(LDARCH) -dynamiclib -framework IOKit -install_name $(LIBDIR)/$(DYNAMIC_LIB) -o $@ $(OBJS)
 
 # Rule for building the Static Library (.a)
 $(STATIC_LIB): $(OBJS)
