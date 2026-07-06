@@ -235,7 +235,7 @@ DirectHWUserClient::CPUIDHelperFunction(void *data)
 {
 	CPUIDHelper * cpuData = (CPUIDHelper *)data;
     cpuData->out->core = (uint32_t)-1;
-    if ((int)cpuData->in->core != cpu_number())
+    if (!dhw::on_this_core(cpuData->in->core))
         return;
     /* x86: CPUID(eax,ecx). arm64: MIDR/ID_AA64* identification. */
     dhw::cpu_identify(cpuData->in->eax, cpuData->in->ecx, cpuData->out->output);
@@ -249,7 +249,7 @@ DirectHWUserClient::ReadMemHelperFunction(void *data)
 {
 	ReadMemHelper * memData = (ReadMemHelper *)data;
     memData->out->core = (uint32_t)-1;
-    if ((int)memData->in->core != cpu_number())
+    if (!dhw::on_this_core(memData->in->core))
         return;
     /*
      * Read a 32-bit word from the requested physical address. The original
@@ -290,11 +290,11 @@ DirectHWUserClient::MSRHelperFunction(void *data)
 		return; // It's a HT thread
 #endif
 
-	if ((int)inStruct->core != cpu_number())
+	if (!dhw::on_this_core(inStruct->core))
 		return;
 
-	IOLog("DirectHW: ReadMSRHelper core %u cpu %d index 0x%x\n",
-		(unsigned int)inStruct->core, cpu_number(), (unsigned int)inStruct->index);
+	IOLog("DirectHW: ReadMSRHelper core %u index 0x%x\n",
+		(unsigned int)inStruct->core, (unsigned int)inStruct->index);
 
 	/*
 	 * x86: RDMSR/WRMSR of inStruct->index.

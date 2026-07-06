@@ -26,7 +26,10 @@ primitives change meaning on Apple Silicon:
 
 Note that on Apple Silicon many EL1 registers and physical ranges are protected
 by the platform, and loading a third-party kext requires reduced security plus
-explicit user approval.
+explicit user approval. There is also no exported KPI to pin execution to a
+specific CPU on arm64 (`mp_rendezvous`/`cpu_xcall` are x86-only or private), so
+`logical_cpu_select()` is best-effort: register reads reflect whichever core the
+request happened to run on, which matters for P/E-core-specific registers.
 
 ### Building/Installing
 

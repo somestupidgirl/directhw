@@ -269,13 +269,18 @@ static inline uint32_t phys_read32(uint64_t phys)
 }
 
 /* ------------------------------------------------------------------ */
-/* Run a function pinned to a specific logical CPU                     */
+/* Run a function on a logical CPU                                     */
 /* ------------------------------------------------------------------ */
 /*
- * x86 has no simple "run on CPU N" KPI, so we broadcast with mp_rendezvous
- * and let the callback self-filter on cpu_number(). arm64 exports cpu_xcall,
- * which dispatches directly to the target CPU (the callback still self-filters
- * so the two paths share identical helper code).
+ * x86 broadcasts with mp_rendezvous (exported via com.apple.kpi.unsupported)
+ * and each callback self-filters on cpu_number(), so it runs exactly on the
+ * requested core.
+ *
+ * arm64 has NO exported KPI to pin execution to a specific CPU: mp_rendezvous
+ * is x86 only, and cpu_xcall / cpu_broadcast_xcall are private (not exported
+ * to third-party kexts). We therefore run the callback on the current CPU and
+ * cannot honor a specific core request. For P/E-core-specific registers the
+ * result reflects whichever core the thread happened to run on.
  */
 
 } /* namespace dhw */
@@ -287,23 +292,36 @@ extern void mp_rendezvous(void (*setup_func)(void *),
 			  void (*action_func)(void *),
 			  void (*teardown_func)(void *),
 			  void *arg);
-#else
-/* from osfmk/arm/machine_routines.h */
-extern kern_return_t cpu_xcall(int cpu, void (*func)(void *), void *arg);
-#endif
 extern int cpu_number(void);
+#endif
 }
 
 namespace dhw {
 
-/* Dispatch `func(arg)` so that it executes on logical CPU `core`. */
+/*
+ * True if the caller's per-core helper should proceed. On x86 the broadcast
+ * runs on every CPU, so only the requested one proceeds. On arm64 there is no
+ * broadcast (we already run on a single, uncontrollable CPU), so always proceed.
+ */
+static inline bool on_this_core(uint32_t requested)
+{
+#if DIRECTHW_ARCH_X86
+	return (int)requested == cpu_number();
+#else
+	(void)requested;
+	return true;
+#endif
+}
+
+/* Dispatch `func(arg)` so that it executes on logical CPU `core` (best effort). */
 static inline void dispatch_on_core(int core, void (*func)(void *), void *arg)
 {
 #if DIRECTHW_ARCH_X86
 	(void)core;
 	mp_rendezvous(NULL, func, NULL, arg);
 #else
-	(void)cpu_xcall(core, func, arg);
+	(void)core;	/* cannot target a CPU on arm64; run on the current one */
+	func(arg);
 #endif
 }
 
