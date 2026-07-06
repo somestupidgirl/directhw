@@ -124,10 +124,13 @@ unload:
 	$(MAKE) -C kext unload KEXTBUNDLE="../$(OUT)/$(KEXTNAME).kext"
 
 # Installation destinations (override on the command line if needed)
-KEXT_PREFIX  ?= /Library/Extensions
-INCLUDEDIR   ?= /usr/local/include
-LIBDIR       ?= /usr/local/lib
-FRAMEWORKDIR ?= /Library/Frameworks
+KEXT_PREFIX     ?= /Library/Extensions
+INCLUDEDIR      ?= /usr/local/include
+LIBDIR          ?= /usr/local/lib
+FRAMEWORKDIR    ?= /Library/Frameworks
+SBINDIR         ?= /usr/local/sbin
+LAUNCHDAEMONDIR ?= /Library/LaunchDaemons
+DAEMON_LABEL    := com.beako.utils.directhwd
 
 # Note: install does NOT depend on `all`. Running `sudo make install` must not
 # rebuild, otherwise the build artifacts in $(OUT) end up owned by root. Build
@@ -157,9 +160,27 @@ uninstall:
 	sudo rm -f  "$(LIBDIR)/libDirectHW.a" "$(LIBDIR)/libDirectHW.dylib"
 	sudo rm -rf "$(FRAMEWORKDIR)/DirectHW.framework"
 
+# Install a LaunchDaemon that live-loads the kext at boot (needed on Apple
+# Silicon when the kext cannot be baked into the boot kext collection). Run
+# after `make install`. bootstrap also loads it immediately.
+install-daemon:
+	@echo "==> Installing directhwd loader into $(SBINDIR)"
+	sudo mkdir -p "$(SBINDIR)"
+	sudo install -o root -g wheel -m 0755 tools/directhwd.sh "$(SBINDIR)/directhwd"
+	@echo "==> Installing LaunchDaemon into $(LAUNCHDAEMONDIR)"
+	sudo install -o root -g wheel -m 0644 tools/$(DAEMON_LABEL).plist "$(LAUNCHDAEMONDIR)/$(DAEMON_LABEL).plist"
+	@echo "==> Activating LaunchDaemon"
+	-sudo launchctl bootout system "$(LAUNCHDAEMONDIR)/$(DAEMON_LABEL).plist" 2>/dev/null || true
+	sudo launchctl bootstrap system "$(LAUNCHDAEMONDIR)/$(DAEMON_LABEL).plist"
+
+uninstall-daemon:
+	-sudo launchctl bootout system "$(LAUNCHDAEMONDIR)/$(DAEMON_LABEL).plist" 2>/dev/null || true
+	sudo rm -f "$(LAUNCHDAEMONDIR)/$(DAEMON_LABEL).plist"
+	sudo rm -f "$(SBINDIR)/directhwd"
+
 clean:
 	rm -rf $(OUT)
 	$(MAKE) -C lib/libDirectHW clean
 	$(MAKE) -C kext clean
 
-.PHONY: all build_all load unload install uninstall clean
+.PHONY: all build_all load unload install uninstall install-daemon uninstall-daemon clean
