@@ -26,12 +26,13 @@ CODESIGN= $(shell xcrun -find -sdk $(SDKROOT) codesign)
 
 # DirectHW Kext Source Files mapping
 CXXSRCS:= DirectHW.cpp
-OBJS:=    $(CXXSRCS:.cpp=.o)
+CSRCS:=   DirectHW_kmod.c
+OBJS:=    $(CXXSRCS:.cpp=.o) $(CSRCS:.c=.o)
 
 CFLAGS+= -DKEXTNAME_S=\"$(BUNDLE_NAME)\" \
 	  -DKEXTVERSION_S=\"$(BUNDLE_VERSION)\" \
 	  -DKEXTBUILD_S=\"$(BUNDLE_BUILD)\" \
-	  -DBUNDLEID_S=\"$(BUNDLEID)\"
+	  -DBUNDLEID_S=\"$(BUNDLE_ID)\"
 
 TIME_STAMP:= $(shell date +"%Y/%m/%dT%H:%M:%S%z")
 CFLAGS+=     -D__TS__=\"$(TIME_STAMP)\"
@@ -79,15 +80,18 @@ LDFLAGS+= -target $(TARGET_TRIPLE) \
 	   $(ARCHFLAGS) \
 	   -nostdlib \
 	   -Xlinker -kext \
-	   -Xlinker -object_path_lto $(OBJS) \
 	   -Xlinker -export_dynamic
 
-LIBS+= -L$(KERNEL_LIBDIR)
+# libkmod.a provides the _start/_stop entry points referenced by kmod_info.
+LIBS+= -L$(KERNEL_LIBDIR) -lkmod
 
 all: debug
 
-%.o: %.cpp DirectHW.hpp
+%.o: %.cpp DirectHW.hpp DirectHW_arch.hpp
 	$(CC) $(CXXFLAGS) -c -o $@ $<
+
+%.o: %.c
+	$(CC) $(CFLAGS) -c -o $@ $<
 
 $(KEXTMACHO): $(OBJS)
 	$(CC) $(LDFLAGS) -o $@ $(OBJS) $(LIBS)
