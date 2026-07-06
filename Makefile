@@ -64,29 +64,41 @@ all: build_all
 
 ifeq ($(ARCH),universal)
 
-# Target builds for universal fat binary distributions 
+# Target builds for universal fat binary distributions
+FWBIN := $(BUNDLE_NAME).framework/Versions/A/$(BUNDLE_NAME)
+
 build_all:
 	rm -rf $(OUT)
-	mkdir -p $(OUT)
+	mkdir -p $(OUT) $(OUT)/.arm64e $(OUT)/.x86_64
 	@echo "==> Building Apple Silicon Slices..."
 	$(MAKE) -C lib/libdirecthw all $(LIB_FLAGS)
 	$(MAKE) -C kext debug $(KEXT_FLAGS)
 	mv kext/$(KEXTNAME).kext $(OUT)/$(KEXTNAME).kext.arm64e
+	cp lib/libdirecthw/libdirecthw.a     $(OUT)/.arm64e/
+	cp lib/libdirecthw/libdirecthw.dylib $(OUT)/.arm64e/
+	cp lib/libdirecthw/$(FWBIN)          $(OUT)/.arm64e/fwbin
+	@# Keep one full framework skeleton (symlinks, Info.plist) from this slice
+	cp -R lib/libdirecthw/$(BUNDLE_NAME).framework $(OUT)/$(BUNDLE_NAME).framework
 	$(MAKE) -C kext clean
 	$(MAKE) -C lib/libdirecthw clean
 	@echo "==> Building Intel Core Slices..."
 	$(MAKE) -C lib/libdirecthw all ARCHFLAGS="-arch x86_64" TARGET_TRIPLE="x86_64-apple-macos10.15"
 	$(MAKE) -C kext debug ARCHFLAGS="-arch x86_64" TARGET_TRIPLE="x86_64-apple-macos10.15"
 	mv kext/$(KEXTNAME).kext $(OUT)/$(KEXTNAME).kext.x86_64
+	cp lib/libdirecthw/libdirecthw.a     $(OUT)/.x86_64/
+	cp lib/libdirecthw/libdirecthw.dylib $(OUT)/.x86_64/
+	cp lib/libdirecthw/$(FWBIN)          $(OUT)/.x86_64/fwbin
 	@echo "==> Packaging Universal Fat Binaries..."
 	cp -R $(OUT)/$(KEXTNAME).kext.arm64e $(OUT)/$(KEXTNAME).kext
 	lipo -create $(OUT)/$(KEXTNAME).kext.arm64e/Contents/MacOS/$(KEXTNAME) \
 	             $(OUT)/$(KEXTNAME).kext.x86_64/Contents/MacOS/$(KEXTNAME) \
 	     -output $(OUT)/$(KEXTNAME).kext/Contents/MacOS/$(KEXTNAME)
 	codesign --force --timestamp=none --sign - $(OUT)/$(KEXTNAME).kext
-	rm -rf $(OUT)/$(KEXTNAME).kext.arm64e $(OUT)/$(KEXTNAME).kext.x86_64
-	@# Move local compilation frameworks and libraries into root out directory
-	mv lib/libdirecthw/libdirecthw.a lib/libdirecthw/libdirecthw.dylib lib/libdirecthw/directhw.framework $(OUT)/
+	@# Fuse the userspace library slices into fat binaries
+	lipo -create $(OUT)/.arm64e/libdirecthw.a     $(OUT)/.x86_64/libdirecthw.a     -output $(OUT)/libdirecthw.a
+	lipo -create $(OUT)/.arm64e/libdirecthw.dylib $(OUT)/.x86_64/libdirecthw.dylib -output $(OUT)/libdirecthw.dylib
+	lipo -create $(OUT)/.arm64e/fwbin             $(OUT)/.x86_64/fwbin             -output $(OUT)/$(FWBIN)
+	rm -rf $(OUT)/$(KEXTNAME).kext.arm64e $(OUT)/$(KEXTNAME).kext.x86_64 $(OUT)/.arm64e $(OUT)/.x86_64
 
 else
 
