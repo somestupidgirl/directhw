@@ -129,7 +129,12 @@ INCLUDEDIR   ?= /usr/local/include
 LIBDIR       ?= /usr/local/lib
 FRAMEWORKDIR ?= /Library/Frameworks
 
-install: all
+# Note: install does NOT depend on `all`. Running `sudo make install` must not
+# rebuild, otherwise the build artifacts in $(OUT) end up owned by root. Build
+# first as a normal user (`make`), then `sudo make install`.
+install:
+	@test -d "$(OUT)/$(KEXTNAME).kext" || { \
+		echo "error: $(OUT)/$(KEXTNAME).kext not found - run 'make' first"; exit 1; }
 	@echo "==> Installing $(KEXTNAME).kext into $(KEXT_PREFIX)"
 	sudo rm -rf "$(KEXT_PREFIX)/$(KEXTNAME).kext"
 	sudo cp -R "$(OUT)/$(KEXTNAME).kext" "$(KEXT_PREFIX)/$(KEXTNAME).kext"
