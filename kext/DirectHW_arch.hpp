@@ -74,6 +74,9 @@ enum {
 	DHW_ARM_CNTPCT_EL0,		/* Counter-timer Physical Count     (RO) */
 	DHW_ARM_PMCR_EL0,		/* Performance Monitors Control     (RW) */
 	DHW_ARM_PMCCNTR_EL0,		/* Cycle Counter                    (RW) */
+	DHW_ARM_CTR_EL0,		/* Cache Type Register              (RO) */
+	DHW_ARM_DCZID_EL0,		/* Data Cache Zero ID               (RO) */
+	DHW_ARM_CNTVCT_EL0,		/* Counter-timer Virtual Count      (RO) */
 	DHW_ARM_NUM_SYSREGS
 };
 
@@ -230,6 +233,9 @@ static inline bool sysreg_read(uint32_t index, uint32_t *lo, uint32_t *hi)
 	DHW_MRS(DHW_ARM_CNTPCT_EL0,     "CNTPCT_EL0");
 	DHW_MRS(DHW_ARM_PMCR_EL0,       "PMCR_EL0");
 	DHW_MRS(DHW_ARM_PMCCNTR_EL0,    "PMCCNTR_EL0");
+	DHW_MRS(DHW_ARM_CTR_EL0,        "CTR_EL0");
+	DHW_MRS(DHW_ARM_DCZID_EL0,      "DCZID_EL0");
+	DHW_MRS(DHW_ARM_CNTVCT_EL0,     "CNTVCT_EL0");
 	default:
 		return false;
 	}
