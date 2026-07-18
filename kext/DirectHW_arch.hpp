@@ -131,12 +131,18 @@ static inline bool port_write(uint64_t addr, uint32_t width, uint32_t data)
 /* CPU identification: x86 CPUID / arm64 MIDR + ID_AA64* registers     */
 /* ------------------------------------------------------------------ */
 
+#if DIRECTHW_ARCH_ARM64
+/* Defined below; used by cpu_identify() to reach the curated sysreg table. */
+static inline bool sysreg_read(uint32_t index, uint32_t *lo, uint32_t *hi);
+#endif
+
 /*
  * Fill out[0..3] with CPU identification words.
  *  x86  : classic CPUID(op1 in EAX, op2 in ECX) -> {eax,ebx,ecx,edx}.
  *  arm64: op1 selects a register group. 0 => {MIDR_EL1, MPIDR_EL1};
  *         any other value is treated as a DHW_ARM_* selector and the chosen
  *         64-bit register is split lo/hi into out[0]/out[1] (out[2..3] = 0).
+ *         An unknown selector yields all-zero output.
  */
 static inline void cpu_identify(uint32_t op1, uint32_t op2, uint32_t out[4])
 {
@@ -146,14 +152,26 @@ static inline void cpu_identify(uint32_t op1, uint32_t op2, uint32_t out[4])
 		: "a"(op1), "c"(op2));
 #else
 	(void)op2;
-	uint64_t midr, mpidr;
-	__asm__ volatile("mrs %0, MIDR_EL1"  : "=r"(midr));
-	__asm__ volatile("mrs %0, MPIDR_EL1" : "=r"(mpidr));
-	out[0] = (uint32_t)midr;
-	out[1] = (uint32_t)(midr >> 32);
-	out[2] = (uint32_t)mpidr;
-	out[3] = (uint32_t)(mpidr >> 32);
-	(void)op1;
+	out[0] = out[1] = out[2] = out[3] = 0;
+
+	if (op1 == 0) {
+		/* Default identity: MIDR_EL1 (out[0:1]) + MPIDR_EL1 (out[2:3]). */
+		uint64_t midr, mpidr;
+		__asm__ volatile("mrs %0, MIDR_EL1"  : "=r"(midr));
+		__asm__ volatile("mrs %0, MPIDR_EL1" : "=r"(mpidr));
+		out[0] = (uint32_t)midr;
+		out[1] = (uint32_t)(midr >> 32);
+		out[2] = (uint32_t)mpidr;
+		out[3] = (uint32_t)(mpidr >> 32);
+		return;
+	}
+
+	/* Non-zero op1: treat as a DHW_ARM_* selector into the curated table. */
+	uint32_t lo = 0, hi = 0;
+	if (sysreg_read(op1, &lo, &hi)) {
+		out[0] = lo;
+		out[1] = hi;
+	}
 #endif
 }
 
