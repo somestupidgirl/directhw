@@ -98,6 +98,16 @@ static inline bool port_read(uint64_t addr, uint32_t width, uint32_t *out)
 	}
 	return false;
 #else /* arm64: physical MMIO */
+	/*
+	 * Device memory does not tolerate unaligned access: an access that
+	 * straddles the natural boundary of its width raises an alignment fault
+	 * and panics the kernel. Require natural alignment and reject anything
+	 * that is not a 1/2/4-byte access.
+	 */
+	if (width != 1 && width != 2 && width != 4)
+		return false;
+	if ((addr & (uint64_t)(width - 1)) != 0)
+		return false;
 	switch (width) {
 	case 1: *out = IOMappedRead8((IOPhysicalAddress)addr);  return true;
 	case 2: *out = IOMappedRead16((IOPhysicalAddress)addr); return true;
@@ -118,6 +128,11 @@ static inline bool port_write(uint64_t addr, uint32_t width, uint32_t data)
 	}
 	return false;
 #else /* arm64: physical MMIO */
+	/* See port_read(): unaligned Device-memory access panics the kernel. */
+	if (width != 1 && width != 2 && width != 4)
+		return false;
+	if ((addr & (uint64_t)(width - 1)) != 0)
+		return false;
 	switch (width) {
 	case 1: IOMappedWrite8((IOPhysicalAddress)addr,  (UInt8)data);  return true;
 	case 2: IOMappedWrite16((IOPhysicalAddress)addr, (UInt16)data); return true;
